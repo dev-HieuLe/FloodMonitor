@@ -1,4 +1,4 @@
-import { getBestFloodSafeRoutes } from "../services/route.service.js";
+import { getBestFloodSafeRoutes } from "../../services/route.service.js";
 
 export async function getBestFloodSafeRoute(req, res) {
   const { startLat, startLon, endLat, endLon } = req.query;

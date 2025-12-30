@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, memo, useMemo } from "react";
 import { Polyline } from "react-leaflet";
 import axios from "axios";
 
-export default function FloodRoadLayer({ cityCenter }) {
+function FloodRoadLayer({ cityCenter, setMapLoading }) {
   const [segments, setSegments] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -12,7 +12,6 @@ export default function FloodRoadLayer({ cityCenter }) {
     let lat;
     let lon;
 
-    // Object format: { lat, lng } or { lat, lon }
     if (typeof cityCenter === "object" && !Array.isArray(cityCenter)) {
       if ("lat" in cityCenter && "lng" in cityCenter) {
         lat = cityCenter.lat;
@@ -23,19 +22,18 @@ export default function FloodRoadLayer({ cityCenter }) {
       }
     }
 
-    // Array format: [lat, lon]
     if (Array.isArray(cityCenter)) {
       lat = cityCenter[0];
       lon = cityCenter[1];
     }
 
-    // HARD GUARD
     if (typeof lat !== "number" || typeof lon !== "number") {
       console.error("Invalid cityCenter:", cityCenter);
       return;
     }
 
     setLoading(true);
+    setMapLoading(true);
     console.log("Flood request params:", lat, lon);
 
     axios
@@ -44,8 +42,6 @@ export default function FloodRoadLayer({ cityCenter }) {
       })
       .then((res) => {
         console.log("Flood API response:", res.data);
-
-        // IMPORTANT FIX
         setSegments(Array.isArray(res.data?.segments) ? res.data.segments : []);
       })
       .catch((err) => {
@@ -54,8 +50,9 @@ export default function FloodRoadLayer({ cityCenter }) {
       })
       .finally(() => {
         setLoading(false);
+        setMapLoading(false);
       });
-  }, [cityCenter]);
+  }, [cityCenter, setMapLoading]);
 
   const getColor = (level) => {
     if (level === "high") return "red";
@@ -64,31 +61,30 @@ export default function FloodRoadLayer({ cityCenter }) {
     return null;
   };
 
-  // Optional: show nothing while loading
+  const polylines = useMemo(() => {
+    if (!Array.isArray(segments)) return null;
+
+    return segments.map((seg) => {
+      const color = getColor(seg.floodLevel);
+      if (!color || !Array.isArray(seg.coords)) return null;
+
+      return (
+        <Polyline
+          key={`${seg.roadId}-${seg.segmentIndex}`}
+          positions={seg.coords.map(([lat, lon]) => [Number(lat), Number(lon)])}
+          pathOptions={{
+            color,
+            weight: 4,
+            opacity: 0.7,
+          }}
+        />
+      );
+    });
+  }, [segments]);
+
   if (loading) return null;
 
-  return (
-    <>
-      {Array.isArray(segments) &&
-        segments.map((seg) => {
-          const color = getColor(seg.floodLevel);
-          if (!color || !Array.isArray(seg.coords)) return null;
-
-          return (
-            <Polyline
-              key={`${seg.roadId}-${seg.segmentIndex}`}
-              positions={seg.coords.map(([lat, lon]) => [
-                Number(lat),
-                Number(lon),
-              ])}
-              pathOptions={{
-                color,
-                weight: 4,
-                opacity: 0.7,
-              }}
-            />
-          );
-        })}
-    </>
-  );
+  return <>{polylines}</>;
 }
+
+export default memo(FloodRoadLayer);

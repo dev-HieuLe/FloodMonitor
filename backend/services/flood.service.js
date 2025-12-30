@@ -1,18 +1,62 @@
+// services/flood.service.js
 import db from "../db.js";
 import { getRainAtPoint } from "./rain.service.js";
+import { nodeKey } from "../utils/node.utils.js";
 
-export async function getFloodBlockedEdges(startLat, startLon, endLat, endLon) {
-  const rain = await getRainAtPoint(startLat, startLon);
-  let effectiveRain = rain.effectiveRain;
+/**
+ * Compress rain so monsoon ≠ disaster
+ */
+function baseRainImpact(effectiveRain) {
+  return Math.pow(effectiveRain, 0.85);
+}
 
-  console.log("[FLOOD] rain =", rain);
+/**
+ * Shared flood math (USED EVERYWHERE)
+ */
+export function computeFloodScore(effectiveRain, elevation, slope) {
+  let score = baseRainImpact(effectiveRain);
 
-  // 🧠 Drying guard
-  if (rain.rain1h === 0 && rain.rain3h === 0 && rain.rain6h === 0) {
-    effectiveRain *= 0.3;
+  // elevation (major factor)
+  if (elevation <= 2) score *= 1.6;
+  else if (elevation <= 5) score *= 1.25;
+  else if (elevation <= 10) score *= 1.1;
+  else score *= 0.35; // high ground almost never floods
+
+  // slope (drainage effect)
+  if (slope != null) {
+    if (slope < 0.3) score *= 1.3;
+    else if (slope < 0.7) score *= 1.15;
+    else score *= 0.85;
   }
 
-  const padding = 0.05;
+  return score;
+}
+
+/**
+ * 🚫 Used by routing
+ * Blocks ONLY roads that are physically flooded (🔴)
+ */
+export async function getFloodBlockedEdges(startLat, startLon, endLat, endLon) {
+  // 🌧️ Sample rain at route center (stable + realistic)
+  const centerLat = (startLat + endLat) / 2;
+  const centerLon = (startLon + endLon) / 2;
+
+  const rain = await getRainAtPoint(centerLat, centerLon);
+  let effectiveRain = rain.effectiveRain;
+
+  // 🧠 Drying guard (critical for Vietnam)
+  if (rain.rain1h === 0 && rain.rain3h === 0 && rain.rain6h === 0) {
+    effectiveRain *= 0.25;
+  }
+
+  // 🌧️ Absolute guard: no meaningful rain → no flood
+  if (effectiveRain < 3) {
+    console.log("[FLOOD] rain too low → no blocks");
+    return new Set();
+  }
+
+  // 🧭 Corridor-only bbox
+  const padding = 0.03;
 
   const minLat = Math.min(startLat, endLat) - padding;
   const maxLat = Math.max(startLat, endLat) + padding;
@@ -21,7 +65,13 @@ export async function getFloodBlockedEdges(startLat, startLon, endLat, endLon) {
 
   const [segments] = await db.query(
     `
-    SELECT start_lat, start_lon, end_lat, end_lon, elevation, slope
+    SELECT
+      start_lat,
+      start_lon,
+      end_lat,
+      end_lon,
+      elevation,
+      slope
     FROM road_segments
     WHERE mid_lat BETWEEN ? AND ?
       AND mid_lon BETWEEN ? AND ?
@@ -32,26 +82,27 @@ export async function getFloodBlockedEdges(startLat, startLon, endLat, endLon) {
   const blocked = new Set();
 
   for (const s of segments) {
-    let floodScore = effectiveRain;
+    const floodScore = computeFloodScore(effectiveRain, s.elevation, s.slope);
 
-    if (s.elevation <= 2) floodScore *= 1.8;
-    else if (s.elevation <= 5) floodScore *= 1.3;
-    else if (s.elevation <= 10) floodScore *= 1.1;
-    else floodScore *= 0.6;
+    /**
+     * 🔴 REAL FLOOD THRESHOLD
+     * >= 45 means:
+     * - water depth likely > 20–30cm
+     * - motorbike impassable
+     * - car unsafe
+     */
+    if (floodScore >= 45) {
+      const from = nodeKey(s.start_lat, s.start_lon, 5);
+      const to = nodeKey(s.end_lat, s.end_lon, 5);
 
-    if (s.slope != null) {
-      if (s.slope < 0.5) floodScore *= 1.6;
-      else if (s.slope < 1) floodScore *= 1.2;
-      else floodScore *= 0.7;
-    }
-
-    if (floodScore >= 14) {
-      blocked.add(`${s.start_lat},${s.start_lon}|${s.end_lat},${s.end_lon}`);
-      blocked.add(`${s.end_lat},${s.end_lon}|${s.start_lat},${s.start_lon}`);
+      blocked.add(`${from}|${to}`);
+      blocked.add(`${to}|${from}`);
     }
   }
 
-  console.log("[FLOOD] blocked edges =", blocked.size);
+  console.log(
+    `[FLOOD] RED blocked edges=${blocked.size} rain=${effectiveRain.toFixed(2)}`
+  );
 
   return blocked;
 }

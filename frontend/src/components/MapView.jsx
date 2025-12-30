@@ -7,7 +7,18 @@ import MapController from "./MapController";
 import RouteLayer from "./RouteLayer";
 import UserMarker from "./UserMarker";
 import FloodRoadLayer from "./FloodLayer";
-// import TrafficRoadLayer from "./TrafficLayer";
+
+// 🔹 Debounce hook (LOCAL, SAFE)
+function useDebouncedValue(value, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+
+  return debounced;
+}
 
 export default function MapView() {
   const [cityCenter, setCityCenter] = useState(null);
@@ -25,6 +36,10 @@ export default function MapView() {
   const [longRouteAlert, setLongRouteAlert] = useState(false);
 
   const [loading, setLoading] = useState(false);
+  const [mapLoading, setMapLoading] = useState(false);
+
+  const debouncedStartText = useDebouncedValue(startText, 300);
+  const debouncedDestText = useDebouncedValue(destText, 300);
 
   // Request GPS once
   useEffect(() => {
@@ -41,6 +56,7 @@ export default function MapView() {
       }
     );
   }, []);
+
   useEffect(() => {
     if (cityCenter) {
       console.log("cityCenter value:", cityCenter);
@@ -74,8 +90,10 @@ export default function MapView() {
     setRouteInfo(null);
     setLoading(true);
 
-    const start = userLocation || (startText ? await geocode(startText) : null);
-    const end = destText ? await geocode(destText) : null;
+    const start =
+      userLocation ||
+      (debouncedStartText ? await geocode(debouncedStartText) : null);
+    const end = debouncedDestText ? await geocode(debouncedDestText) : null;
 
     if (!start || !end) {
       alert("Invalid start or destination");
@@ -97,7 +115,6 @@ export default function MapView() {
 
     setRouteInfo(info);
 
-    // Check long route
     if (info.duration > 5400) {
       setLongRouteAlert(true);
     }
@@ -137,17 +154,9 @@ export default function MapView() {
         )}
       </div>
 
-      {/* GPS warning */}
-      {locationError === "denied" && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-yellow-100 border border-yellow-300 p-3 rounded shadow text-sm">
-          <strong>Location access is off</strong>
-          <p className="mt-1">Enable location permission and refresh.</p>
-        </div>
-      )}
-
-      {/* No route alert */}
+      {/* 🚨 NO ROUTE ALERT (RESTORED) */}
       {noRouteAlert && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-red-100 border border-red-300 p-3 rounded shadow text-sm max-w-md flex justify-between items-start">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1600] bg-red-100 border border-red-300 p-3 rounded shadow text-sm max-w-md flex justify-between items-start">
           <div>
             <strong>No available route found</strong>
             <p className="mt-1">
@@ -164,37 +173,30 @@ export default function MapView() {
         </div>
       )}
 
-      {/* Long route alert */}
+      {/* ⚠️ LONG ROUTE ALERT */}
       {longRouteAlert && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1000] bg-yellow-100 border border-yellow-300 p-3 rounded shadow text-sm max-w-md">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1600] bg-yellow-100 border border-yellow-300 p-3 rounded shadow text-sm max-w-md">
           <strong>Long route warning</strong>
           <p className="mt-1">
-            The estimated travel time is more than 1 hour 30 minutes. Are you
-            sure you want to go?
+            The estimated travel time is more than 1 hour 30 minutes.
           </p>
         </div>
       )}
-      {loading && (
-        <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-black/20">
-          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+
+      {/* Flood map loading overlay */}
+      {mapLoading && (
+        <div className="absolute inset-0 z-[1500] bg-black/30 flex items-center justify-center pointer-events-none">
+          <div className="bg-white px-6 py-4 rounded shadow flex items-center gap-3">
+            <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-sm font-medium">Loading flood data…</span>
+          </div>
         </div>
       )}
 
-      {/* Route info */}
-      {routeInfo && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[1000] bg-white shadow rounded px-4 py-2 flex gap-6">
-          <div>
-            <p className="text-xs text-gray-500">Distance</p>
-            <p className="font-semibold">
-              {(routeInfo.distance / 1000).toFixed(1)} km
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500">Duration</p>
-            <p className="font-semibold">
-              {Math.round(routeInfo.duration / 60)} min
-            </p>
-          </div>
+      {/* Route loading */}
+      {loading && (
+        <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-black/20">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
 
@@ -208,8 +210,13 @@ export default function MapView() {
 
         {cityCenter && <MapController center={cityCenter} />}
         {userLocation && <UserMarker position={userLocation} />}
-        {cityCenter && <FloodRoadLayer cityCenter={cityCenter} />}
-        {/* {cityCenter && <TrafficRoadLayer cityCenter={cityCenter} />} */}
+
+        {cityCenter && (
+          <FloodRoadLayer
+            cityCenter={cityCenter}
+            setMapLoading={setMapLoading}
+          />
+        )}
 
         {routeStart && destination && (
           <RouteLayer

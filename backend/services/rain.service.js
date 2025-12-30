@@ -1,13 +1,12 @@
 import axios from "axios";
-const FORCE_MOCK_RAIN = true;
+const FORCE_MOCK_RAIN = false;
 export const getRainAtPoint = async (lat, lon, mockRain = null) => {
   if (FORCE_MOCK_RAIN) {
     console.warn("[RAIN] FORCE MOCK ENABLED");
-
-    const rain1h = 10;
-    const rain3h = 60;
-    const rain6h = 40;
-    const rain24h = 50;
+    const rain1h = 50;
+    const rain3h = 100;
+    const rain6h = 220;
+    const rain24h = 200;
 
     return {
       rain1h,
@@ -20,19 +19,14 @@ export const getRainAtPoint = async (lat, lon, mockRain = null) => {
     };
   }
 
+  const url = "https://api.open-meteo.com/v1/forecast";
+
   const params = {
     latitude: lat,
     longitude: lon,
     hourly: "precipitation",
     timezone: "Asia/Bangkok",
   };
-
-  console.log(
-    `[getRainAtPoint] Calling ${isHistorical ? "archive" : "forecast"} API`,
-    `URL: ${url}`,
-    `Params:`,
-    params
-  );
 
   try {
     const res = await axios.get(url, { params, timeout: 8000 });
